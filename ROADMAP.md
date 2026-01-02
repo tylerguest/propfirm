@@ -3,34 +3,49 @@
 This is a manual-first roadmap: start trading manually on a small account (currently ~$94), while building the research, data, journaling, and risk process so that **automation/bots are the last thing left** later.
 
 ## V1 Success Criteria (Manual Trading + Research Stack)
-- You can backtest a strategy end-to-end on Coinbase data (fees/slippage assumptions versioned).
+- You can backtest a strategy end-to-end on Coinbase data with a documented execution + fee model.
+- Backtests are strategy-specific but run through a shared engine and can be applied across multiple tickers.
 - Every manual trade is journaled with enough detail to audit decisions and results.
 - Daily/weekly reporting exists (PnL, drawdown, fees, exposure, notes).
 - A written risk policy is followed consistently (position sizing + daily loss stop).
 
 ## Phase 0 — Foundations (P0)
 **Goal:** a safe local setup that you can run and maintain without Docker.
-- [ ] Standardize local runtime: Python `venv` (or equivalent) + pinned dependencies.
-- [ ] Add `.env.example` (no secrets) + document required env vars.
-- [ ] Secrets policy: if/when you use API keys, make them least-privilege (trade only; withdrawals disabled); separate paper vs live keys.
+- [x] Standardize local runtime: Python `venv` (or equivalent) + pinned dependencies.
+- [x] Add `.env.example` (no secrets) + document required env vars.
+- [x] Secrets policy baseline: keep `.env` out of git; use least-privilege keys if/when needed.
 - [ ] Structured logging (JSON preferred) + log rotation plan.
-- [ ] Local data dirs: `data/` and `logs/` gitignored; backup plan (encrypted).
+- [x] Local data dirs: `data/` and `logs/` gitignored; backup plan (encrypted).
 - [ ] “One command” run targets for research tooling (e.g., fetch data, run backtests, generate report).
 
 ## Phase 1 — Data Pipeline for Backtesting (P0)
 **Goal:** collect/normalize Coinbase market data so backtests are easy and repeatable.
-- [ ] Historical candles download (start with 1–5 symbols).
-- [ ] Normalized data format (timestamps, timezones, gaps, corporate actions not relevant for crypto).
-- [ ] Data validation checks (missing candles, duplicates, outliers).
-- [ ] Versioned assumptions: timeframe(s), fee model, slippage model, and data source.
+- [x] Historical candles download for BTC-USD (1h, ~5y) into `data/raw` + `data/processed`.
+- [ ] Expand to 3–5 symbols.
+- [x] Normalized data format (timestamps, timezones, gaps; standard OHLCV columns).
+- [x] Data validation checks (dedupe + gap detection).
+- [ ] Versioned assumptions: timeframe(s), data source, and gap policy.
 
 ## Phase 2 — Backtesting Harness (Start ASAP) (P0)
 **Goal:** iterate on strategies quickly with guardrails against self-deception.
-- [ ] Backtest runner that loads normalized data and produces metrics + equity curve.
-- [ ] Explicit fees/slippage; no “free fills”.
+- [ ] Standardize a backtest architecture:
+  - **Engine:** data loading, gap handling, execution timing (e.g., signal on close → execute next open), fees/slippage, positions/equity
+  - **Strategies:** small, strategy-specific modules that output a target position or orders
+  - **Runner:** applies the same strategy across multiple tickers/timeframes and writes a comparable results table
+- [x] Make costs explicit and realistic:
+  - VIP 4 spot fees: **2.5 bps maker** / **6.5 bps taker** (run both as best-case vs stress-case)
+  - Slippage model: start with fixed bps, then upgrade later if needed
+- [x] Baselines: buy-and-hold + at least one simple trend strategy (SMA crossover).
+- [ ] Add “do nothing” baseline.
+- [x] Initial scripts exist: `research/backtests/hello_world_backtest.py` and `research/backtests/coinbase_backtest.py`.
+- [ ] Output artifacts per run:
+  - metrics summary (CSV/JSON)
+  - trade blotter (every fill with timestamp/price/fee)
+  - config snapshot (parameters + cost assumptions)
 - [ ] Walk-forward / train-test split conventions (even if simple at first).
-- [ ] Baselines: buy-and-hold + “do nothing” + simple moving average crossover.
-- [ ] Output artifacts: run config + results are saved for comparison.
+- [ ] Parameter discipline:
+  - avoid “one set of params per ticker” overfitting
+  - prefer global ranges and evaluate robustness across tickers and time windows
 
 ## Phase 3 — Manual Trading Journal + Reporting (P0)
 **Goal:** you can always answer: “what did I do, and did it work?”
@@ -53,7 +68,7 @@ This is a manual-first roadmap: start trading manually on a small account (curre
 
 ## Phase 6 — Automation Readiness (Design First) (P1)
 **Goal:** when you decide to build bots, the interfaces and constraints already exist.
-- [ ] Define a single strategy interface: inputs (data), outputs (signals), config schema.
+- [ ] Keep the strategy interface consistent between backtests and (future) live trading.
 - [ ] Define an execution interface (place/cancel/query) that can be mocked for tests.
 - [ ] Define risk gatekeeper rules as pure functions (testable without exchange access).
 - [ ] Decide storage for production journaling (SQLite still fine for V1 automation).

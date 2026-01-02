@@ -1,0 +1,5 @@
+# Keep this minimal early on; pin versions once you have the first scripts working.
+requests
+pandas
+numpy
+

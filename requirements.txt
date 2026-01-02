@@ -2,4 +2,6 @@
 requests
 pandas
 numpy
-
+PyJWT
+cryptography
+cdp-sdk

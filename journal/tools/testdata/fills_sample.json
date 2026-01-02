@@ -1,0 +1,25 @@
+[
+  {
+    "created_at": "2026-01-01T12:00:00Z",
+    "trade_id": 100000001,
+    "product_id": "BTC-USD",
+    "order_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "side": "buy",
+    "liquidity": "M",
+    "price": "42000.00",
+    "size": "0.0005",
+    "fee": "0.0105"
+  },
+  {
+    "created_at": "2026-01-02T12:00:00Z",
+    "trade_id": 100000002,
+    "product_id": "BTC-USD",
+    "order_id": "ffffffff-1111-2222-3333-444444444444",
+    "side": "sell",
+    "liquidity": "M",
+    "price": "43000.00",
+    "size": "0.0005",
+    "fee": "0.01075"
+  }
+]
+

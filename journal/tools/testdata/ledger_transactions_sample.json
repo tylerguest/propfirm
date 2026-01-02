@@ -1,0 +1,12 @@
+[
+  {
+    "id": "deposit_demo_001",
+    "type": "fiat_deposit",
+    "status": "completed",
+    "created_at": "2026-01-02T14:00:00Z",
+    "amount": { "amount": "94.00", "currency": "USD" },
+    "details": { "title": "Deposit", "subtitle": "Initial funding" },
+    "account": "USD Wallet"
+  }
+]
+

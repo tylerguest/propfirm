@@ -1,0 +1,1 @@
+trade_id,fill_id,time_utc,venue,account,symbol,side,order_type,liquidity,price,qty_base,qty_quote,fee_quote,fee_rate_bps,order_id,trade_type,sequence_timestamp,size_in_quote,retail_portfolio_id,notes

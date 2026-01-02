@@ -49,8 +49,10 @@ This is a manual-first roadmap: start trading manually on a small account (curre
 
 ## Phase 3 — Manual Trading Journal + Reporting (P0)
 **Goal:** you can always answer: “what did I do, and did it work?”
-- [ ] Choose journaling format (CSV/SQLite/Notion/etc.) and standardize required fields:
+- [x] Choose journaling format (CSV) and standardize required fields:
   - timestamp, symbol, side, size, entry/exit, fees, thesis, invalidation, notes, outcome
+- [x] Journal scaffolding + tools: templates, init/validate, fill sync, trade derivation.
+- [x] Manual ledger entry workflow (deposits/withdrawals) via CLI.
 - [ ] Daily report script/template: starting equity, ending equity, realized PnL, max drawdown, notes.
 - [ ] Weekly review: what setups worked, what didn’t, and what to change in backtests.
 
@@ -104,3 +106,9 @@ This is a manual-first roadmap: start trading manually on a small account (curre
 - [ ] Manual trade journaling + daily/weekly review cadence is consistent.
 - [ ] Written risk policy exists and you track compliance.
 - [ ] Automation is a “final swap-in”, not a rewrite.
+
+## Next Up (Recommended Order)
+1) Expand data to 3–5 symbols and document gap policy + assumptions.
+2) Add backtest run artifacts (metrics CSV + blotter + config snapshot).
+3) Add daily report template (equity, PnL, drawdown, fees, notes).
+4) Draft a simple risk policy (max loss per day/trade, max exposure).

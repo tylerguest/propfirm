@@ -7,6 +7,10 @@ data/**
 logs/**
 !logs/.gitkeep
 
+# Trade journal (keep templates in git, keep actual journal private)
+journal/local/**
+!journal/local/.gitkeep
+
 # Secrets
 .env
 

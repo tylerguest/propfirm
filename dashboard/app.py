@@ -8,32 +8,49 @@ import pandas as pd
 import streamlit as st
 
 
+def _candidate_run_dirs(root: Path) -> list[Path]:
+    candidates = [root]
+    runs_child = root / "runs"
+    if runs_child.exists():
+        candidates.append(runs_child)
+    seen = set()
+    unique: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append(path)
+    return unique
+
+
 def _load_runs(runs_dir: Path) -> list[dict[str, object]]:
     runs: list[dict[str, object]] = []
-    if not runs_dir.exists():
-        return runs
-    for path in runs_dir.iterdir():
-        if not path.is_dir():
+    for candidate in _candidate_run_dirs(runs_dir):
+        if not candidate.exists():
             continue
-        metrics = path / "metrics.csv"
-        config = path / "config.json"
-        fills = path / "fills.csv"
-        if not metrics.exists() or not config.exists():
-            continue
-        try:
-            cfg = json.loads(config.read_text(encoding="utf-8"))
-            df = pd.read_csv(metrics)
-        except Exception:
-            continue
-        runs.append(
-            {
-                "path": path,
-                "symbol": str(cfg.get("symbol") or "unknown"),
-                "config": cfg,
-                "metrics": df,
-                "fills_path": fills if fills.exists() else None,
-            }
-        )
+        for path in candidate.iterdir():
+            if not path.is_dir():
+                continue
+            metrics = path / "metrics.csv"
+            config = path / "config.json"
+            fills = path / "fills.csv"
+            if not metrics.exists() or not config.exists():
+                continue
+            try:
+                cfg = json.loads(config.read_text(encoding="utf-8"))
+                df = pd.read_csv(metrics)
+            except Exception:
+                continue
+            runs.append(
+                {
+                    "path": path,
+                    "symbol": str(cfg.get("symbol") or "unknown"),
+                    "config": cfg,
+                    "metrics": df,
+                    "fills_path": fills if fills.exists() else None,
+                }
+            )
     return runs
 
 
@@ -42,7 +59,9 @@ def _pick_latest_runs(runs: list[dict[str, object]]) -> list[dict[str, object]]:
     for run in runs:
         symbol = str(run["symbol"])
         current = latest.get(symbol)
-        if current is None or run["path"].name > current["path"].name:
+        run_ts = str(run["config"].get("created_at_utc") or "")
+        current_ts = str(current["config"].get("created_at_utc") or "") if current else ""
+        if current is None or run_ts > current_ts:
             latest[symbol] = run
     return list(latest.values())
 
@@ -77,8 +96,8 @@ def main() -> None:
     st.set_page_config(page_title="Research Dashboard", layout="wide")
     st.title("Research Dashboard")
 
-    runs_dir = Path(st.sidebar.text_input("Runs directory", "research/output"))
-    runs = _load_runs(runs_dir)
+    runs_root = Path(st.sidebar.text_input("Runs directory", "research/output"))
+    runs = _load_runs(runs_root)
     if not runs:
         st.info("No run artifacts found. Run backtests first.")
         return
@@ -90,7 +109,14 @@ def main() -> None:
     symbols = sorted({str(r["symbol"]) for r in runs})
     symbol = st.sidebar.selectbox("Symbol", symbols)
     symbol_runs = [r for r in runs if r["symbol"] == symbol]
-    run_ids = [r["path"].name for r in sorted(symbol_runs, key=lambda r: r["path"].name, reverse=True)]
+    run_ids = [
+        r["path"].name
+        for r in sorted(
+            symbol_runs,
+            key=lambda r: str(r["config"].get("created_at_utc") or ""),
+            reverse=True,
+        )
+    ]
     run_id = st.sidebar.selectbox("Run", run_ids)
     run = next(r for r in symbol_runs if r["path"].name == run_id)
 

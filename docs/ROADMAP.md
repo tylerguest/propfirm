@@ -1,6 +1,6 @@
-# ROADMAP — Automated Solo Crypto Prop Firm (Coinbase-first, Local-first)
+# ROADMAP — Solo “Prop-Grade” Crypto Firm (Coinbase-first, Local-first)
 
-Primary objective: build a **local automated** trading system with paper/sim parity, strong risk gates, and reliable journaling.
+Primary objective: build a **local automated** prop‑grade stack with paper/sim parity, strong risk gates, reliable journaling, and a Command Center dashboard.
 
 ## V1 Success Criteria
 - Paper/sim trading loop runs end-to-end with journaling + reporting.
@@ -48,14 +48,43 @@ Primary objective: build a **local automated** trading system with paper/sim par
 - [ ] Backup/restore test (monthly).
 - [ ] Incident drills (API errors, WS disconnects).
 
-## Phase 6 — Research Dashboard (P1)
-**Goal:** a single view for strategy performance and costs.
-- [ ] Dashboard shows latest run per symbol.
-- [ ] Equity + drawdown charts per strategy.
-- [ ] Fees/slippage impact summary.
-- [ ] Exportable HTML report.
+## Phase 6 — Command Center Dashboard (P1)
+**Goal:** a single hub that scales from research to live trading without rework.
+
+### Sector 1 — Research Dashboard (P0)
+- [x] Metrics table + totals per strategy
+- [x] Fees paid % per strategy
+- [x] Equity curve + drawdown (per strategy)
+- [x] Parameter sweep heatmaps
+- [x] Multi‑symbol comparison view
+
+### Sector 2 — Paper/Live Execution (P0)
+- [ ] Live/paper positions view (by symbol)
+- [ ] Open orders + recent fills
+- [ ] Current strategy signals
+- [ ] Execution health (latency, errors, retries)
+
+### Sector 3 — Risk & Compliance (P0)
+- [ ] Daily loss limit remaining
+- [ ] Max exposure by symbol
+- [ ] Rule violations log
+- [ ] Kill‑switch status + last triggered
+
+### Sector 4 — Reporting (P1)
+- [ ] Daily PnL summary (realized + unrealized)
+- [ ] Weekly summary snapshot
+- [ ] Fees + slippage attribution
+
+### Sector 5 — Ops (P1)
+- [ ] Data freshness / last update time
+- [ ] Disk space + backup status
+- [ ] Alerts history
+
+### Phase Milestones
+- [ ] Phase A — Command Center: Top‑level “Today” panel (PnL, drawdown, exposure, limit remaining)
+- [ ] Phase B — Compliance Status: Risk limit status (green/yellow/red) with clear thresholds
 
 ## Next Up (Recommended Order)
-1) Finish paper/sim journaling (fills → trades → daily report).
-2) Implement risk gatekeeper (limits + cooldowns + kill-switch).
-3) Wire Coinbase live execution (orders + reconciliation + alerts).
+1) Add dashboard “Today” panel + risk status (Command Center baseline).
+2) Finish paper/sim journaling (fills → trades → daily report).
+3) Implement risk gatekeeper (limits + cooldowns + kill-switch).

@@ -1,0 +1,11 @@
+{
+  "execution": "taker",
+  "slippage_bps": 5.0,
+  "gap_cooldown_bars": 1,
+  "gap_policy": "segment",
+  "maker_fee_bps": 2.5,
+  "taker_fee_bps": 6.5,
+  "fast_sma": 20,
+  "slow_sma": 100,
+  "initial_cash": 1.0
+}

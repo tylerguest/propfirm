@@ -31,7 +31,14 @@ Goal: a single hub that scales from research to live trading without rework.
 - [ ] Disk space + backup status
 - [ ] Alerts history
 
+## Phase Milestones
+### Phase A — Command Center (P0)
+- [ ] Top‑level “Today” panel (PnL, drawdown, exposure, limit remaining)
+
+### Phase B — Compliance Status (P0)
+- [ ] Risk limit status (green/yellow/red) with clear thresholds
+
 ## Next Up (Recommended)
-1) Add equity + drawdown charts to the research dashboard.
-2) Add multi‑symbol comparison in research dashboard.
-3) Add positions + recent fills panel for paper/live.
+1) Add a top “Today” strip (account equity, day PnL, risk headroom, last sync).
+2) Add positions + recent fills panel for paper/live.
+3) Add open orders + execution health (latency, errors, retries).

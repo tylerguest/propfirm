@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -31,20 +34,20 @@ def _parse_args() -> argparse.Namespace:
         help="Comma-separated symbols to run (overrides --symbol). Example: BTC-USD,ETH-USD,SOL-USD",
     )
     p.add_argument("--granularity-seconds", type=int, default=None, help="Override candle granularity in seconds.")
-    p.add_argument("--execution", choices=["maker", "taker"], default="taker", help="Assumed execution type (default: taker).")
-    p.add_argument("--slippage-bps", type=float, default=5.0, help="Slippage model in bps (default: 5).")
-    p.add_argument("--gap-cooldown-bars", type=int, default=1, help="Bars to block trades after a detected gap (default: 1).")
+    p.add_argument("--execution", choices=["maker", "taker"], default=None, help="Assumed execution type (default: taker).")
+    p.add_argument("--slippage-bps", type=float, default=None, help="Slippage model in bps (default: 5).")
+    p.add_argument("--gap-cooldown-bars", type=int, default=None, help="Bars to block trades after a detected gap (default: 1).")
     p.add_argument(
         "--gap-policy",
         choices=["skip", "forward_fill", "segment"],
-        default="segment",
+        default=None,
         help="Gap handling policy (default: segment).",
     )
-    p.add_argument("--maker-fee-bps", type=float, default=2.5, help="Maker fee in bps (default: 2.5).")
-    p.add_argument("--taker-fee-bps", type=float, default=6.5, help="Taker fee in bps (default: 6.5).")
-    p.add_argument("--fast-sma", type=int, default=20, help="Fast SMA window (default: 20).")
-    p.add_argument("--slow-sma", type=int, default=100, help="Slow SMA window (default: 100).")
-    p.add_argument("--initial-cash", type=float, default=1.0, help="Initial cash in quote currency units (default: 1.0).")
+    p.add_argument("--maker-fee-bps", type=float, default=None, help="Maker fee in bps (default: 2.5).")
+    p.add_argument("--taker-fee-bps", type=float, default=None, help="Taker fee in bps (default: 6.5).")
+    p.add_argument("--fast-sma", type=int, default=None, help="Fast SMA window (default: 20).")
+    p.add_argument("--slow-sma", type=int, default=None, help="Slow SMA window (default: 100).")
+    p.add_argument("--initial-cash", type=float, default=None, help="Initial cash in quote currency units (default: 1.0).")
     p.add_argument(
         "--save-artifacts",
         action=argparse.BooleanOptionalAction,
@@ -56,7 +59,58 @@ def _parse_args() -> argparse.Namespace:
         default="research/output",
         help="Base directory for saved runs (default: research/output).",
     )
+    p.add_argument(
+        "--config",
+        default=None,
+        help="Optional JSON config file for run settings (default: none).",
+    )
     return p.parse_args()
+
+
+@dataclass(frozen=True)
+class RunConfig:
+    execution: str
+    slippage_bps: float
+    gap_cooldown_bars: int
+    gap_policy: str
+    maker_fee_bps: float
+    taker_fee_bps: float
+    fast_sma: int
+    slow_sma: int
+    initial_cash: float
+
+
+def _load_config(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    cfg_path = Path(path)
+    if not cfg_path.exists():
+        raise SystemExit(f"Config not found: {cfg_path}")
+    return json.loads(cfg_path.read_text(encoding="utf-8"))
+
+
+def _resolve_run_config(args: argparse.Namespace) -> RunConfig:
+    cfg = _load_config(args.config)
+
+    def pick(name: str, default: Any) -> Any:
+        value = getattr(args, name)
+        if value is not None:
+            return value
+        if name in cfg:
+            return cfg[name]
+        return default
+
+    return RunConfig(
+        execution=str(pick("execution", "taker")),
+        slippage_bps=float(pick("slippage_bps", 5.0)),
+        gap_cooldown_bars=int(pick("gap_cooldown_bars", 1)),
+        gap_policy=str(pick("gap_policy", "segment")),
+        maker_fee_bps=float(pick("maker_fee_bps", 2.5)),
+        taker_fee_bps=float(pick("taker_fee_bps", 6.5)),
+        fast_sma=int(pick("fast_sma", 20)),
+        slow_sma=int(pick("slow_sma", 100)),
+        initial_cash=float(pick("initial_cash", 1.0)),
+    )
 
 
 def _max_drawdown(equity: pd.Series) -> float:
@@ -110,9 +164,39 @@ def _metrics_row(
     }
 
 
-def _run_id(*, symbol: str, strategy_count: int) -> str:
-    ts = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"{ts}_{symbol}_x{strategy_count}"
+def _get_git_commit() -> str:
+    head_path = Path(".git/HEAD")
+    if not head_path.exists():
+        return "unknown"
+    head = head_path.read_text(encoding="utf-8").strip()
+    if head.startswith("ref: "):
+        ref = head.split(" ", 1)[1]
+        ref_path = Path(".git") / ref
+        if ref_path.exists():
+            return ref_path.read_text(encoding="utf-8").strip()
+        return "unknown"
+    return head[:40]
+
+
+def _config_hash(payload: dict[str, Any]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _run_id(*, symbol: str, strategy_count: int, config_hash: str) -> str:
+    return f"{symbol}_x{strategy_count}_{config_hash[:12]}"
+
+
+def _append_registry_row(*, output_dir: Path, row: dict[str, str]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    index_path = output_dir / "index.csv"
+    is_new = not index_path.exists()
+    fieldnames = list(row.keys())
+    with index_path.open("a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if is_new:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def _write_artifacts(
@@ -186,6 +270,7 @@ def _write_artifacts(
 
 
 def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
+    run_cfg = _resolve_run_config(args)
     if args.csv:
         csv_path = Path(args.csv)
     else:
@@ -200,13 +285,13 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
     cfg = BacktestConfig(
         csv_path=csv_path,
         granularity_seconds=granularity_seconds,
-        fee_schedule=FeeSchedule(maker_fee_bps=float(args.maker_fee_bps), taker_fee_bps=float(args.taker_fee_bps)),
-        execution=str(args.execution),
-        slippage_bps=float(args.slippage_bps),
-        gap_cooldown_bars=int(args.gap_cooldown_bars),
-        fast_sma=int(args.fast_sma),
-        slow_sma=int(args.slow_sma),
-        initial_cash=float(args.initial_cash),
+        fee_schedule=FeeSchedule(maker_fee_bps=run_cfg.maker_fee_bps, taker_fee_bps=run_cfg.taker_fee_bps),
+        execution=run_cfg.execution,
+        slippage_bps=run_cfg.slippage_bps,
+        gap_cooldown_bars=run_cfg.gap_cooldown_bars,
+        fast_sma=run_cfg.fast_sma,
+        slow_sma=run_cfg.slow_sma,
+        initial_cash=run_cfg.initial_cash,
     )
 
     start = df.loc[0, "time"]
@@ -216,12 +301,12 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
     segments, gap_ranges = apply_gap_policy(
         df,
         granularity_seconds=cfg.granularity_seconds,
-        policy=str(args.gap_policy),
+        policy=str(run_cfg.gap_policy),
     )
 
     print(f"Dataset: {cfg.csv_path}")
     print(f"Rows: {len(df)}  Start: {start}  End: {end}  Granularity: {cfg.granularity_seconds}s")
-    print(f"Gap policy: {args.gap_policy}")
+    print(f"Gap policy: {run_cfg.gap_policy}")
     if gap_ranges:
         missing_candles = int(sum(((e - s).total_seconds() / cfg.granularity_seconds) + 1 for s, e in gap_ranges))
         print(f"Gaps: {len(gap_ranges)}  Missing candles (approx): {missing_candles}")
@@ -230,7 +315,7 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
     else:
         print("Gaps: 0")
 
-    if str(args.gap_policy) == "segment":
+    if str(run_cfg.gap_policy) == "segment":
         if segments:
             df = max(segments, key=len)
     else:
@@ -284,28 +369,64 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
 
     if args.save_artifacts:
         run_symbol = symbol or "latest"
-        run_dir = Path(args.output_dir) / _run_id(symbol=run_symbol, strategy_count=len(metrics_rows))
+        created_at = datetime.now(tz=UTC)
+        strategies = list_strategies()
+        config_payload = {
+            "symbol": run_symbol,
+            "csv_path": str(cfg.csv_path),
+            "granularity_seconds": cfg.granularity_seconds,
+            "data_start": pd.Timestamp(start).isoformat().replace("+00:00", "Z"),
+            "data_end": pd.Timestamp(end).isoformat().replace("+00:00", "Z"),
+            "gap_policy": run_cfg.gap_policy,
+            "execution": cfg.execution,
+            "maker_fee_bps": cfg.fee_schedule.maker_fee_bps,
+            "taker_fee_bps": cfg.fee_schedule.taker_fee_bps,
+            "slippage_bps": cfg.slippage_bps,
+            "gap_cooldown_bars": cfg.gap_cooldown_bars,
+            "fast_sma": cfg.fast_sma,
+            "slow_sma": cfg.slow_sma,
+            "initial_cash": cfg.initial_cash,
+            "strategies": strategies,
+        }
+        cfg_hash = _config_hash(config_payload)
+        output_root = Path(args.output_dir)
+        run_dir = output_root / "runs" / _run_id(symbol=run_symbol, strategy_count=len(metrics_rows), config_hash=cfg_hash)
         _write_artifacts(
             out_dir=run_dir,
             config={
-                "csv_path": str(cfg.csv_path),
-                "symbol": run_symbol,
-                "granularity_seconds": cfg.granularity_seconds,
-                "gap_policy": str(args.gap_policy),
-                "execution": cfg.execution,
-                "maker_fee_bps": cfg.fee_schedule.maker_fee_bps,
-                "taker_fee_bps": cfg.fee_schedule.taker_fee_bps,
-                "slippage_bps": cfg.slippage_bps,
-                "gap_cooldown_bars": cfg.gap_cooldown_bars,
-                "fast_sma": cfg.fast_sma,
-                "slow_sma": cfg.slow_sma,
-                "initial_cash": cfg.initial_cash,
-                "strategies": list_strategies(),
+                **config_payload,
                 "run_id": run_dir.name,
+                "config_hash": cfg_hash,
+                "created_at_utc": created_at.isoformat().replace("+00:00", "Z"),
+                "git_commit": _get_git_commit(),
             },
             metrics_rows=metrics_rows,
             fills=fills,
             equity_curves=equity_curves,
+        )
+        _append_registry_row(
+            output_dir=output_root,
+            row={
+                "run_id": run_dir.name,
+                "created_at_utc": created_at.isoformat().replace("+00:00", "Z"),
+                "symbol": run_symbol,
+                "granularity_seconds": str(cfg.granularity_seconds),
+                "data_start": pd.Timestamp(start).isoformat().replace("+00:00", "Z"),
+                "data_end": pd.Timestamp(end).isoformat().replace("+00:00", "Z"),
+                "gap_policy": str(run_cfg.gap_policy),
+                "execution": cfg.execution,
+                "maker_fee_bps": f"{cfg.fee_schedule.maker_fee_bps:.6f}",
+                "taker_fee_bps": f"{cfg.fee_schedule.taker_fee_bps:.6f}",
+                "slippage_bps": f"{cfg.slippage_bps:.6f}",
+                "gap_cooldown_bars": str(cfg.gap_cooldown_bars),
+                "fast_sma": str(cfg.fast_sma),
+                "slow_sma": str(cfg.slow_sma),
+                "initial_cash": f"{cfg.initial_cash:.6f}",
+                "strategies": "|".join(strategies),
+                "csv_path": str(cfg.csv_path),
+                "config_hash": cfg_hash,
+                "git_commit": _get_git_commit(),
+            },
         )
         print(f"Wrote artifacts: {run_dir}")
 

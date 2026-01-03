@@ -1,16 +1,16 @@
-# GOALS — Solo “One-Man” Crypto Prop Firm (Coinbase-first, Local-first)
+# GOALS — Solo “Prop-Grade” Crypto Firm (Coinbase-first, Local-first)
 
 ## 1) Overview
 - **Project name:** (TBD)
-- **Objective:** build an automated crypto trading system for Coinbase (Advanced Trade) that runs locally on my own hardware.
-- **Philosophy:** strict separation of concerns between **Research (offline)** and **Production (live execution)**.
-- **Primary constraint:** risk management + reliability > raw returns.
+- **Objective:** build a prop‑grade trading stack (research → risk → execution → journal → review) that runs locally on my own hardware.
+- **Philosophy:** strict separation of concerns between **Research (offline)** and **Production (live execution)**, with a single Command Center for visibility.
+- **Primary constraint:** risk management + reliability > raw returns; no trade should bypass the gatekeeper.
 - **Status:** pre-alpha / foundation phase.
 
 ## 2) Guiding Principles
 - **Risk-first:** preserve capital; define hard loss/exposure limits and enforce them in code.
 - **Local-first:** run bots locally; cloud is optional for alerts/backups only.
-- **Simple + observable:** fewer components, structured logs, metrics, and fast incident response.
+- **Simple + observable:** fewer components, structured logs, metrics, and fast incident response via a Command Center.
 - **Reproducible:** strategy code, configs, and backtests are versioned and repeatable.
 - **Secure by default:** least-privilege keys, secrets never committed, auditable changes.
 
@@ -78,6 +78,12 @@ Goal: continuous improvement and auditability.
 - Trade journal: persist every order + fill + error + state transition.
 - Reporting: daily PnL, drawdown, fees, slippage, win/loss, error counts.
 
+### D) Command Center (Single Pane of Glass)
+Goal: one dashboard that reflects research performance, live/paper state, and risk posture.
+- Today panel: PnL, drawdown, exposure, limit remaining, last sync.
+- Execution view: positions, open orders, recent fills, signal status.
+- Risk status: green/yellow/red limits with clear thresholds and violations log.
+
 ## 8) Risk & Trading Policy (Baseline)
 - Define a fixed risk budget per day/week and per strategy.
 - Enforce hard stops at max daily loss; require manual review to resume.
@@ -112,7 +118,7 @@ Goal: continuous improvement and auditability.
 - Remote services: optional alerts + encrypted backups only.
 
 ## 12) Roadmap & Milestones
-- [ ] Step 1: Coinbase connectivity + market data + local run/stop + secrets handling
+- [ ] Step 1: Command Center baseline (Today panel + positions + risk status placeholders)
 - [ ] Step 2: Paper/sim trading loop with end-to-end journaling + reporting
 - [ ] Step 3: Risk gatekeeper module (hard limits + kill-switch)
 - [ ] Step 4: Backtesting harness + first strategy candidate + walk-forward sanity checks

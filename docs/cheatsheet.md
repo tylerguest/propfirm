@@ -41,7 +41,7 @@ This is your quick-reference sheet for **running the stack**, **journaling**, an
 - `research/`: data collection + backtests
 - `journal/`: templates + local journal + tools
 - `tools/`: auth and balance helpers
-- `GOALS.md` / `ROADMAP.md`: roadmap + priorities
+- `docs/GOALS.md` / `docs/ROADMAP.md`: roadmap + priorities
 
 ## Coinbase Advanced Python SDK (Docs Review)
 Docs: https://coinbase.github.io/coinbase-advanced-py/

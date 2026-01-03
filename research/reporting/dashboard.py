@@ -15,22 +15,41 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _candidate_run_dirs(root: Path) -> list[Path]:
+    candidates = [root]
+    runs_child = root / "runs"
+    if runs_child.exists():
+        candidates.append(runs_child)
+    seen = set()
+    unique: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append(path)
+    return unique
+
+
 def _load_runs(runs_dir: Path) -> list[dict[str, object]]:
     runs: list[dict[str, object]] = []
-    for path in runs_dir.iterdir():
-        if not path.is_dir():
+    for candidate in _candidate_run_dirs(runs_dir):
+        if not candidate.exists():
             continue
-        metrics = path / "metrics.csv"
-        config = path / "config.json"
-        if not metrics.exists() or not config.exists():
-            continue
-        try:
-            cfg = json.loads(config.read_text(encoding="utf-8"))
-            df = pd.read_csv(metrics)
-        except Exception:
-            continue
-        symbol = str(cfg.get("symbol") or "unknown")
-        runs.append({"path": path, "symbol": symbol, "config": cfg, "metrics": df})
+        for path in candidate.iterdir():
+            if not path.is_dir():
+                continue
+            metrics = path / "metrics.csv"
+            config = path / "config.json"
+            if not metrics.exists() or not config.exists():
+                continue
+            try:
+                cfg = json.loads(config.read_text(encoding="utf-8"))
+                df = pd.read_csv(metrics)
+            except Exception:
+                continue
+            symbol = str(cfg.get("symbol") or "unknown")
+            runs.append({"path": path, "symbol": symbol, "config": cfg, "metrics": df})
     return runs
 
 
@@ -39,7 +58,9 @@ def _pick_latest_runs(runs: list[dict[str, object]]) -> list[dict[str, object]]:
     for run in runs:
         symbol = str(run["symbol"])
         current = latest.get(symbol)
-        if current is None or run["path"].name > current["path"].name:
+        run_ts = str(run["config"].get("created_at_utc") or "")
+        current_ts = str(current["config"].get("created_at_utc") or "") if current else ""
+        if current is None or run_ts > current_ts:
             latest[symbol] = run
     return list(latest.values())
 

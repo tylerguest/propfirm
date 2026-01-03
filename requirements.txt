@@ -5,3 +5,5 @@ numpy
 PyJWT
 cryptography
 cdp-sdk
+matplotlib
+streamlit

@@ -7,6 +7,9 @@ data/**
 logs/**
 !logs/.gitkeep
 
+# Backtest outputs
+research/output/**
+
 # Trade journal (keep templates in git, keep actual journal private)
 journal/local/**
 !journal/local/.gitkeep

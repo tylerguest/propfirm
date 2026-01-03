@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from research.data_contract import apply_gap_policy, infer_granularity_seconds, load_ohlcv_csv
+from research.data_loader import DataSpec, find_processed_csv
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -28,11 +29,18 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Path to processed CSV (default: newest match in data/processed).",
     )
+    parser.add_argument("--symbol", default=None, help="Optional symbol filter (e.g., BTC-USD).")
     parser.add_argument("--granularity-seconds", type=int, default=None, help="Override candle granularity in seconds.")
     parser.add_argument("--fast-sma", type=int, default=20, help="Fast SMA window (default: 20).")
     parser.add_argument("--slow-sma", type=int, default=100, help="Slow SMA window (default: 100).")
     parser.add_argument("--fee-bps", type=float, default=10.0, help="Fee in bps per trade (default: 10).")
     parser.add_argument("--slippage-bps", type=float, default=5.0, help="Slippage in bps per trade (default: 5).")
+    parser.add_argument(
+        "--gap-policy",
+        choices=["skip", "forward_fill", "segment"],
+        default="segment",
+        help="Gap handling policy (default: segment).",
+    )
     parser.add_argument(
         "--gap-cooldown-bars",
         type=int,
@@ -43,54 +51,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _find_latest_processed_csv() -> Path:
-    processed_dir = Path("data/processed")
-    candidates = sorted(processed_dir.glob("*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not candidates:
-        raise SystemExit("No CSVs found in data/processed. Run `python3 research/fetch_history.py` first.")
-    return candidates[0]
-
-
-def _infer_granularity_seconds(path: Path, df: pd.DataFrame) -> int:
-    m = re.search(r"_(\d+)s_", path.name)
-    if m:
-        return int(m.group(1))
-
-    diffs = df["time"].diff().dropna().dt.total_seconds()
-    if diffs.empty:
-        raise ValueError("cannot infer granularity (no diffs)")
-    mode = diffs.mode()
-    if mode.empty:
-        raise ValueError("cannot infer granularity (no mode)")
-    return int(mode.iloc[0])
-
-
-def load_ohlcv_csv(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    required = {"time", "open", "high", "low", "close", "volume"}
-    missing = required.difference(df.columns)
-    if missing:
-        raise SystemExit(f"CSV missing required columns: {sorted(missing)}")
-
-    df["time"] = pd.to_datetime(df["time"], utc=True)
-    df = df.drop_duplicates(subset=["time"], keep="last").sort_values("time").reset_index(drop=True)
-    return df
-
-
-def compute_gaps(df: pd.DataFrame, *, granularity_seconds: int) -> tuple[pd.Series, list[tuple[pd.Timestamp, pd.Timestamp]]]:
-    freq = pd.Timedelta(seconds=granularity_seconds)
-    diffs = df["time"].diff()
-    gap = diffs > freq
-
-    gap_ranges: list[tuple[pd.Timestamp, pd.Timestamp]] = []
-    gap_indices = gap[gap].index.tolist()
-    for idx in gap_indices:
-        prev_ts = df.loc[idx - 1, "time"]
-        ts = df.loc[idx, "time"]
-        missing_start = prev_ts + freq
-        missing_end = ts - freq
-        gap_ranges.append((missing_start, missing_end))
-
-    return gap.fillna(False), gap_ranges
+    return find_processed_csv(DataSpec())
 
 
 @dataclass(frozen=True)
@@ -198,12 +159,16 @@ def print_summary(result: BacktestResult, *, start: pd.Timestamp, end: pd.Timest
 
 def main() -> None:
     args = _parse_args()
-    csv_path = Path(args.csv) if args.csv else _find_latest_processed_csv()
+    if args.csv:
+        csv_path = Path(args.csv)
+    else:
+        spec = DataSpec(symbol=str(args.symbol).strip() if args.symbol else None)
+        csv_path = find_processed_csv(spec)
     if not csv_path.exists():
         raise SystemExit(f"CSV not found: {csv_path}")
 
     df = load_ohlcv_csv(csv_path)
-    granularity_seconds = int(args.granularity_seconds) if args.granularity_seconds else _infer_granularity_seconds(csv_path, df)
+    granularity_seconds = int(args.granularity_seconds) if args.granularity_seconds else infer_granularity_seconds(csv_path, df)
 
     cfg = BacktestConfig(
         csv_path=csv_path,
@@ -215,7 +180,11 @@ def main() -> None:
         gap_cooldown_bars=int(args.gap_cooldown_bars),
     )
 
-    gap, gap_ranges = compute_gaps(df, granularity_seconds=cfg.granularity_seconds)
+    segments, gap_ranges = apply_gap_policy(
+        df,
+        granularity_seconds=cfg.granularity_seconds,
+        policy=str(args.gap_policy),
+    )
     missing_candles = int(sum(((end - start).total_seconds() / cfg.granularity_seconds) + 1 for start, end in gap_ranges))
 
     start = df.loc[0, "time"]
@@ -224,12 +193,19 @@ def main() -> None:
 
     print(f"Dataset: {cfg.csv_path}")
     print(f"Rows: {len(df)}  Start: {start}  End: {end}  Granularity: {cfg.granularity_seconds}s")
+    print(f"Gap policy: {args.gap_policy}")
     if gap_ranges:
         print(f"Gaps: {len(gap_ranges)}  Missing candles (approx): {missing_candles}")
         for s, e in gap_ranges[:5]:
             print(f"- missing: {s} → {e}")
     else:
         print("Gaps: 0")
+
+    if str(args.gap_policy) == "segment":
+        if segments:
+            df = max(segments, key=len)
+    else:
+        df = segments[0] if segments else df
 
     bh = backtest_buy_and_hold(df)
     sma = backtest_sma_crossover(df, cfg)

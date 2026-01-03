@@ -228,6 +228,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch Coinbase historical candles into data/raw and data/processed.")
     parser.add_argument("--product-id", default="BTC-USD", help="Coinbase product id (default: BTC-USD).")
     parser.add_argument(
+        "--product-ids",
+        default=None,
+        help="Comma-separated product ids (overrides --product-id). Example: BTC-USD,ETH-USD,SOL-USD",
+    )
+    parser.add_argument(
         "--granularity-seconds",
         type=int,
         default=3600,
@@ -278,57 +283,73 @@ def main() -> None:
     else:
         start = end - timedelta(days=365 * int(args.years))
 
-    cfg = FetchConfig(
-        product_id=args.product_id,
-        granularity_seconds=int(args.granularity_seconds),
-        start=start,
-        end=end,
-        out_dir_raw=Path(args.raw_dir),
-        out_dir_processed=Path(args.processed_dir),
-        base_url=str(args.base_url),
-    )
+    if args.product_ids:
+        product_ids = [p.strip() for p in str(args.product_ids).split(",") if p.strip()]
+    else:
+        product_ids = [str(args.product_id).strip()]
 
-    cfg.out_dir_raw.mkdir(parents=True, exist_ok=True)
-    cfg.out_dir_processed.mkdir(parents=True, exist_ok=True)
+    out_dir_raw = Path(args.raw_dir)
+    out_dir_processed = Path(args.processed_dir)
+    out_dir_raw.mkdir(parents=True, exist_ok=True)
+    out_dir_processed.mkdir(parents=True, exist_ok=True)
 
-    df = fetch_coinbase_exchange_candles(cfg, limit_per_request=int(args.limit_per_request))
-    missing_ranges = validate_candles(df, granularity_seconds=cfg.granularity_seconds)
-    if missing_ranges and args.attempt_gap_fill:
-        print("Attempting to refetch missing ranges...")
-        df = attempt_gap_fill(
-            df,
-            cfg=cfg,
-            missing_ranges=missing_ranges,
-            limit_per_request=int(args.limit_per_request),
+    def _clean_old_outputs(*, symbol: str, granularity_seconds: int) -> None:
+        prefix = f"{symbol}_{granularity_seconds}s_"
+        for path in out_dir_raw.glob(f"{prefix}*.json"):
+            path.unlink(missing_ok=True)
+        for path in out_dir_processed.glob(f"{prefix}*.csv"):
+            path.unlink(missing_ok=True)
+
+    for product_id in product_ids:
+        cfg = FetchConfig(
+            product_id=product_id,
+            granularity_seconds=int(args.granularity_seconds),
+            start=start,
+            end=end,
+            out_dir_raw=out_dir_raw,
+            out_dir_processed=out_dir_processed,
+            base_url=str(args.base_url),
         )
+
+        _clean_old_outputs(symbol=cfg.product_id.replace("/", "-"), granularity_seconds=cfg.granularity_seconds)
+        df = fetch_coinbase_exchange_candles(cfg, limit_per_request=int(args.limit_per_request))
         missing_ranges = validate_candles(df, granularity_seconds=cfg.granularity_seconds)
-        if missing_ranges:
-            print("Gap fill incomplete: some ranges are still missing. Consider refetching those windows later.")
+        if missing_ranges and args.attempt_gap_fill:
+            print("Attempting to refetch missing ranges...")
+            df = attempt_gap_fill(
+                df,
+                cfg=cfg,
+                missing_ranges=missing_ranges,
+                limit_per_request=int(args.limit_per_request),
+            )
+            missing_ranges = validate_candles(df, granularity_seconds=cfg.granularity_seconds)
+            if missing_ranges:
+                print("Gap fill incomplete: some ranges are still missing. Consider refetching those windows later.")
 
-    safe_product = cfg.product_id.replace("/", "-")
-    dataset_start = pd.Timestamp(df["time"].min()).date()
-    dataset_end = pd.Timestamp(df["time"].max()).date()
-    label = f"{safe_product}_{cfg.granularity_seconds}s_{dataset_start}_{dataset_end}"
+        safe_product = cfg.product_id.replace("/", "-")
+        dataset_start = pd.Timestamp(df["time"].min()).date()
+        dataset_end = pd.Timestamp(df["time"].max()).date()
+        label = f"{safe_product}_{cfg.granularity_seconds}s_{dataset_start}_{dataset_end}"
 
-    raw_path = cfg.out_dir_raw / f"{label}.json"
-    processed_path = cfg.out_dir_processed / f"{label}.csv"
+        raw_path = cfg.out_dir_raw / f"{label}.json"
+        processed_path = cfg.out_dir_processed / f"{label}.csv"
 
-    raw_records = [
-        {
-            "time": row["time"].isoformat(),
-            "low": float(row["low"]),
-            "high": float(row["high"]),
-            "open": float(row["open"]),
-            "close": float(row["close"]),
-            "volume": float(row["volume"]),
-        }
-        for row in df.to_dict(orient="records")
-    ]
-    raw_path.write_text(json.dumps(raw_records, indent=2), encoding="utf-8")
-    df.to_csv(processed_path, index=False)
+        raw_records = [
+            {
+                "time": row["time"].isoformat(),
+                "low": float(row["low"]),
+                "high": float(row["high"]),
+                "open": float(row["open"]),
+                "close": float(row["close"]),
+                "volume": float(row["volume"]),
+            }
+            for row in df.to_dict(orient="records")
+        ]
+        raw_path.write_text(json.dumps(raw_records, indent=2), encoding="utf-8")
+        df.to_csv(processed_path, index=False)
 
-    print(f"Wrote raw:       {raw_path}")
-    print(f"Wrote processed: {processed_path}")
+        print(f"Wrote raw:       {raw_path}")
+        print(f"Wrote processed: {processed_path}")
 
 
 if __name__ == "__main__":

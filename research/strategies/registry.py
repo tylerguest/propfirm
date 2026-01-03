@@ -12,6 +12,14 @@ from research.strategies.ema_crossover import EmaCrossoverConfig, generate_targe
 from research.strategies.momentum_time_based import TimeMomentumConfig, generate_target_position as momentum_target
 from research.strategies.rsi_mean_reversion import RsiMeanReversionConfig, generate_target_position as rsi_target
 from research.strategies.sma_crossover import SmaCrossoverConfig, generate_target_position as sma_target
+from research.strategies.trend_regime_filter import (
+    TrendRegimeFilterConfig,
+    generate_target_position as regime_target,
+)
+from research.strategies.volatility_targeted_trend import (
+    VolatilityTargetedTrendConfig,
+    generate_target_position as vol_target,
+)
 
 
 class StrategyFn(Protocol):
@@ -60,6 +68,16 @@ _REGISTRY: dict[str, StrategySpec] = {
         name="time_momentum",
         config_type=TimeMomentumConfig,
         generate_target_position=momentum_target,
+    ),
+    "volatility_targeted_trend": StrategySpec(
+        name="volatility_targeted_trend",
+        config_type=VolatilityTargetedTrendConfig,
+        generate_target_position=vol_target,
+    ),
+    "trend_regime_filter": StrategySpec(
+        name="trend_regime_filter",
+        config_type=TrendRegimeFilterConfig,
+        generate_target_position=regime_target,
     ),
 }
 

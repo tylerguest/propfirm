@@ -18,8 +18,8 @@ Goal: a tight, repeatable research pipeline that produces comparable results and
 - [x] Baselines (buy/hold, do-nothing).
 - [x] Trend/mean-reversion mix (SMA/EMA, Donchian, Bollinger, RSI).
 - [x] Momentum/time-based strategy.
-- [ ] Add 1 volatility-targeted strategy.
-- [ ] Add 1 regime filter (trend vs chop).
+- [x] Add 1 volatility-targeted strategy.
+- [x] Add 1 regime filter (trend vs chop).
 
 ## Phase 3 — Experiment Discipline (P0)
 - [x] Configs folder with versioned run params (fees, slippage, gap policy).
@@ -28,7 +28,7 @@ Goal: a tight, repeatable research pipeline that produces comparable results and
 - [ ] Compare-runs view (same symbol/timeframe across configs).
 
 ## Phase 4 — Robustness (P1)
-- [ ] Walk-forward runner (train/validation splits with no leakage).
+- [x] Walk-forward runner (train/validation splits with no leakage).
 - [ ] Sensitivity analysis (parameter stability across ranges).
 - [ ] Stress tests (fees/slippage spikes, missing data segments).
 - [ ] Out-of-sample holdout results captured.

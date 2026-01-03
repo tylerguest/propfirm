@@ -13,6 +13,10 @@
   ```bash
   python3 research/backtests/run_all_strategies.py --csv data/processed/BTC-USD_3600s_2021-01-03_2026-01-02.csv --config research/configs/backtest_base.json
   ```
+- Walk-forward splits (2y train / 1y test):
+  ```bash
+  python3 research/backtests/walk_forward.py --symbol BTC-USD --train-years 2 --test-years 1 --step-years 1
+  ```
 
 ## Parameter Sweeps
 - SMA sweep (example):
@@ -24,6 +28,20 @@
 - Update/overwrite historical candles:
   ```bash
   python3 research/fetch_history.py --product-ids BTC-USD,ETH-USD,SOL-USD,ADA-USD --granularity-seconds 3600 --overwrite
+  ```
+- Fetch multiple granularities for multiple symbols:
+  ```bash
+  python3 research/fetch_history.py --product-ids BTC-USD,ETH-USD,SOL-USD --granularities-seconds 300,900,3600
+  ```
+- Fetch all USD spot products from Coinbase Exchange:
+  ```bash
+  python3 research/fetch_history.py --fetch-products --quote-currency USD --granularities-seconds 3600
+  ```
+
+## Index Maintenance
+- Rebuild dataset index from existing CSVs:
+  ```bash
+  python3 scripts/rebuild_processed_index.py
   ```
 
 ## Research Runner

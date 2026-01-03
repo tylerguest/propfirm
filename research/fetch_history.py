@@ -67,6 +67,42 @@ def _http_get_with_backoff(
     raise RuntimeError(f"Failed GET after {max_attempts} attempts: {url}") from last_exc
 
 
+def fetch_exchange_products(*, base_url: str) -> list[dict[str, Any]]:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "Accept": "application/json",
+            "User-Agent": "propfirm-research-fetch-history/1.0",
+        }
+    )
+    resp = _http_get_with_backoff(session, f"{base_url}/products", params={})
+    payload = resp.json()
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Unexpected products response shape: {type(payload)}: {payload}")
+    return payload
+
+
+def load_products_from_file(path: Path) -> list[str]:
+    if not path.exists():
+        raise FileNotFoundError(path)
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            # Accept a list of product ids or product objects.
+            if payload and isinstance(payload[0], dict):
+                return [str(p["id"]).strip() for p in payload if "id" in p]
+            return [str(p).strip() for p in payload]
+        raise ValueError("JSON products file must be a list.")
+    if path.suffix.lower() in {".csv", ".tsv"}:
+        df = pd.read_csv(path)
+        if "product_id" in df.columns:
+            return [str(p).strip() for p in df["product_id"].dropna().tolist()]
+        if "id" in df.columns:
+            return [str(p).strip() for p in df["id"].dropna().tolist()]
+        raise ValueError("CSV products file must include 'product_id' or 'id' column.")
+    raise ValueError("Unsupported products file type. Use .json or .csv.")
+
+
 def fetch_coinbase_exchange_candles(
     cfg: FetchConfig,
     *,
@@ -233,10 +269,31 @@ def _parse_args() -> argparse.Namespace:
         help="Comma-separated product ids (overrides --product-id). Example: BTC-USD,ETH-USD,SOL-USD",
     )
     parser.add_argument(
+        "--products-file",
+        default=None,
+        help="Path to JSON/CSV file with product ids (overrides --product-id).",
+    )
+    parser.add_argument(
+        "--fetch-products",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Fetch product list from Coinbase Exchange (default: false).",
+    )
+    parser.add_argument(
+        "--quote-currency",
+        default="USD",
+        help="Filter fetched products by quote currency when using --fetch-products (default: USD).",
+    )
+    parser.add_argument(
         "--granularity-seconds",
         type=int,
         default=3600,
         help="Candle granularity in seconds (default: 3600 for 1h).",
+    )
+    parser.add_argument(
+        "--granularities-seconds",
+        default=None,
+        help="Comma-separated granularities (overrides --granularity-seconds). Example: 300,900,3600",
     )
     parser.add_argument(
         "--years",
@@ -246,6 +303,18 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--start", default=None, help="UTC start datetime (ISO8601). Example: 2021-01-01T00:00:00Z")
     parser.add_argument("--end", default=None, help="UTC end datetime (ISO8601). Default: now.")
+    parser.add_argument(
+        "--incremental",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Fetch only data after the latest indexed dataset (default: true).",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Overwrite existing datasets for the symbol/granularity (default: false).",
+    )
     parser.add_argument(
         "--limit-per-request",
         type=int,
@@ -274,6 +343,26 @@ def _parse_dt(value: str) -> datetime:
     return dt.astimezone(UTC)
 
 
+def _find_latest_indexed_end(
+    *,
+    index_path: Path,
+    product_id: str,
+    granularity_seconds: int,
+) -> datetime | None:
+    if not index_path.exists():
+        return None
+    df = pd.read_csv(index_path)
+    if df.empty:
+        return None
+    subset = df[
+        (df["product_id"] == product_id) & (df["granularity_seconds"].astype(int) == int(granularity_seconds))
+    ]
+    if subset.empty:
+        return None
+    latest = subset.sort_values("dataset_end").iloc[-1]
+    return _parse_dt(str(latest["dataset_end"]) + "T00:00:00Z")
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -285,8 +374,25 @@ def main() -> None:
 
     if args.product_ids:
         product_ids = [p.strip() for p in str(args.product_ids).split(",") if p.strip()]
+    elif args.products_file:
+        product_ids = load_products_from_file(Path(args.products_file))
+    elif args.fetch_products:
+        products = fetch_exchange_products(base_url=str(args.base_url))
+        quote = str(args.quote_currency).strip().upper()
+        product_ids = [
+            str(p["id"]).strip()
+            for p in products
+            if p.get("quote_currency") == quote and p.get("status") == "online"
+        ]
+        if not product_ids:
+            raise RuntimeError(f"No products found for quote_currency={quote} with status=online.")
     else:
         product_ids = [str(args.product_id).strip()]
+
+    if args.granularities_seconds:
+        granularities = [int(x.strip()) for x in str(args.granularities_seconds).split(",") if x.strip()]
+    else:
+        granularities = [int(args.granularity_seconds)]
 
     out_dir_raw = Path(args.raw_dir)
     out_dir_processed = Path(args.processed_dir)
@@ -300,56 +406,92 @@ def main() -> None:
         for path in out_dir_processed.glob(f"{prefix}*.csv"):
             path.unlink(missing_ok=True)
 
+    index_path = out_dir_processed / "index.csv"
+    index_header = [
+        "product_id",
+        "granularity_seconds",
+        "dataset_start",
+        "dataset_end",
+        "processed_path",
+    ]
+
     for product_id in product_ids:
-        cfg = FetchConfig(
-            product_id=product_id,
-            granularity_seconds=int(args.granularity_seconds),
-            start=start,
-            end=end,
-            out_dir_raw=out_dir_raw,
-            out_dir_processed=out_dir_processed,
-            base_url=str(args.base_url),
-        )
+        for granularity_seconds in granularities:
+            fetch_start = start
+            if not args.start and args.incremental:
+                latest_end = _find_latest_indexed_end(
+                    index_path=index_path,
+                    product_id=product_id,
+                    granularity_seconds=int(granularity_seconds),
+                )
+                if latest_end is not None:
+                    fetch_start = latest_end + timedelta(seconds=int(granularity_seconds))
 
-        _clean_old_outputs(symbol=cfg.product_id.replace("/", "-"), granularity_seconds=cfg.granularity_seconds)
-        df = fetch_coinbase_exchange_candles(cfg, limit_per_request=int(args.limit_per_request))
-        missing_ranges = validate_candles(df, granularity_seconds=cfg.granularity_seconds)
-        if missing_ranges and args.attempt_gap_fill:
-            print("Attempting to refetch missing ranges...")
-            df = attempt_gap_fill(
-                df,
-                cfg=cfg,
-                missing_ranges=missing_ranges,
-                limit_per_request=int(args.limit_per_request),
+            if fetch_start >= end:
+                print(
+                    f"Skipping {product_id} {granularity_seconds}s: "
+                    f"start={fetch_start.isoformat()} >= end={end.isoformat()}"
+                )
+                continue
+
+            cfg = FetchConfig(
+                product_id=product_id,
+                granularity_seconds=int(granularity_seconds),
+                start=fetch_start,
+                end=end,
+                out_dir_raw=out_dir_raw,
+                out_dir_processed=out_dir_processed,
+                base_url=str(args.base_url),
             )
+
+            if args.overwrite:
+                _clean_old_outputs(symbol=cfg.product_id.replace("/", "-"), granularity_seconds=cfg.granularity_seconds)
+            df = fetch_coinbase_exchange_candles(cfg, limit_per_request=int(args.limit_per_request))
             missing_ranges = validate_candles(df, granularity_seconds=cfg.granularity_seconds)
-            if missing_ranges:
-                print("Gap fill incomplete: some ranges are still missing. Consider refetching those windows later.")
+            if missing_ranges and args.attempt_gap_fill:
+                print("Attempting to refetch missing ranges...")
+                df = attempt_gap_fill(
+                    df,
+                    cfg=cfg,
+                    missing_ranges=missing_ranges,
+                    limit_per_request=int(args.limit_per_request),
+                )
+                missing_ranges = validate_candles(df, granularity_seconds=cfg.granularity_seconds)
+                if missing_ranges:
+                    print("Gap fill incomplete: some ranges are still missing. Consider refetching those windows later.")
 
-        safe_product = cfg.product_id.replace("/", "-")
-        dataset_start = pd.Timestamp(df["time"].min()).date()
-        dataset_end = pd.Timestamp(df["time"].max()).date()
-        label = f"{safe_product}_{cfg.granularity_seconds}s_{dataset_start}_{dataset_end}"
+            safe_product = cfg.product_id.replace("/", "-")
+            dataset_start = pd.Timestamp(df["time"].min()).date()
+            dataset_end = pd.Timestamp(df["time"].max()).date()
+            label = f"{safe_product}_{cfg.granularity_seconds}s_{dataset_start}_{dataset_end}"
 
-        raw_path = cfg.out_dir_raw / f"{label}.json"
-        processed_path = cfg.out_dir_processed / f"{label}.csv"
+            raw_path = cfg.out_dir_raw / f"{label}.json"
+            processed_path = cfg.out_dir_processed / f"{label}.csv"
 
-        raw_records = [
-            {
-                "time": row["time"].isoformat(),
-                "low": float(row["low"]),
-                "high": float(row["high"]),
-                "open": float(row["open"]),
-                "close": float(row["close"]),
-                "volume": float(row["volume"]),
-            }
-            for row in df.to_dict(orient="records")
-        ]
-        raw_path.write_text(json.dumps(raw_records, indent=2), encoding="utf-8")
-        df.to_csv(processed_path, index=False)
+            raw_records = [
+                {
+                    "time": row["time"].isoformat(),
+                    "low": float(row["low"]),
+                    "high": float(row["high"]),
+                    "open": float(row["open"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                }
+                for row in df.to_dict(orient="records")
+            ]
+            raw_path.write_text(json.dumps(raw_records, indent=2), encoding="utf-8")
+            df.to_csv(processed_path, index=False)
 
-        print(f"Wrote raw:       {raw_path}")
-        print(f"Wrote processed: {processed_path}")
+            if not index_path.exists():
+                index_path.write_text(",".join(index_header) + "\n", encoding="utf-8")
+            with index_path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"{cfg.product_id},{cfg.granularity_seconds},"
+                    f"{dataset_start},{dataset_end},{processed_path}\n"
+                )
+
+            print(f"Wrote raw:       {raw_path}")
+            print(f"Wrote processed: {processed_path}")
 
 
 if __name__ == "__main__":

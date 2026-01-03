@@ -48,6 +48,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--fast-sma", type=int, default=None, help="Fast SMA window (default: 20).")
     p.add_argument("--slow-sma", type=int, default=None, help="Slow SMA window (default: 100).")
     p.add_argument("--initial-cash", type=float, default=None, help="Initial cash in quote currency units (default: 1.0).")
+    p.add_argument("--start", default=None, help="UTC start datetime (ISO8601). Example: 2021-01-01T00:00:00Z")
+    p.add_argument("--end", default=None, help="UTC end datetime (ISO8601). Default: last candle.")
+    p.add_argument(
+        "--years",
+        type=int,
+        default=None,
+        help="How many years back from end to include (optional). Ignored if --start is set.",
+    )
     p.add_argument(
         "--save-artifacts",
         action=argparse.BooleanOptionalAction,
@@ -111,6 +119,13 @@ def _resolve_run_config(args: argparse.Namespace) -> RunConfig:
         slow_sma=int(pick("slow_sma", 100)),
         initial_cash=float(pick("initial_cash", 1.0)),
     )
+
+
+def _parse_dt(value: str) -> pd.Timestamp:
+    v = value.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    return pd.Timestamp(v).tz_convert("UTC") if pd.Timestamp(v).tzinfo else pd.Timestamp(v, tz="UTC")
 
 
 def _max_drawdown(equity: pd.Series) -> float:
@@ -183,8 +198,20 @@ def _config_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _run_id(*, symbol: str, strategy_count: int, config_hash: str) -> str:
-    return f"{symbol}_x{strategy_count}_{config_hash[:12]}"
+def _run_id(
+    *,
+    symbol: str,
+    strategy_count: int,
+    config_hash: str,
+    created_at: datetime,
+    granularity_seconds: int,
+    data_start: pd.Timestamp,
+    data_end: pd.Timestamp,
+) -> str:
+    ts = created_at.strftime("%Y%m%dT%H%M%SZ")
+    start_date = data_start.date().isoformat()
+    end_date = data_end.date().isoformat()
+    return f"{symbol}_{granularity_seconds}s_{start_date}_{end_date}_x{strategy_count}_{config_hash[:8]}_{ts}"
 
 
 def _append_registry_row(*, output_dir: Path, row: dict[str, str]) -> None:
@@ -294,6 +321,23 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
         initial_cash=run_cfg.initial_cash,
     )
 
+    data_start = df.loc[0, "time"]
+    data_end = df.loc[len(df) - 1, "time"]
+    if args.end:
+        range_end = _parse_dt(str(args.end))
+    else:
+        range_end = pd.Timestamp(data_end)
+    if args.start:
+        range_start = _parse_dt(str(args.start))
+    elif args.years:
+        range_start = range_end - pd.Timedelta(days=365 * int(args.years))
+    else:
+        range_start = pd.Timestamp(data_start)
+
+    df = df[(df["time"] >= range_start) & (df["time"] <= range_end)].reset_index(drop=True)
+    if df.empty:
+        raise SystemExit(f"No data after filtering range {range_start} → {range_end}.")
+
     start = df.loc[0, "time"]
     end = df.loc[len(df) - 1, "time"]
     periods_per_year = (365.25 * 24 * 3600) / cfg.granularity_seconds
@@ -390,7 +434,15 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
         }
         cfg_hash = _config_hash(config_payload)
         output_root = Path(args.output_dir)
-        run_dir = output_root / "runs" / _run_id(symbol=run_symbol, strategy_count=len(metrics_rows), config_hash=cfg_hash)
+        run_dir = output_root / "runs" / _run_id(
+            symbol=run_symbol,
+            strategy_count=len(metrics_rows),
+            config_hash=cfg_hash,
+            created_at=created_at,
+            granularity_seconds=cfg.granularity_seconds,
+            data_start=pd.Timestamp(start),
+            data_end=pd.Timestamp(end),
+        )
         _write_artifacts(
             out_dir=run_dir,
             config={

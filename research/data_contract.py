@@ -62,6 +62,22 @@ def infer_granularity_seconds(path: Path, df: pd.DataFrame) -> int:
     m = re.search(r"_(\d+)s_", path.name)
     if m:
         return int(m.group(1))
+    label_map = {
+        "1m": 60,
+        "5m": 300,
+        "15m": 900,
+        "30m": 1800,
+        "1h": 3600,
+        "2h": 7200,
+        "4h": 14400,
+        "6h": 21600,
+        "1d": 86400,
+    }
+    m = re.search(r"_(\d+[mhd])_", path.name)
+    if m:
+        label = m.group(1)
+        if label in label_map:
+            return label_map[label]
 
     diffs = df[TIME_COLUMN_PRIMARY].diff().dropna().dt.total_seconds()
     if diffs.empty:

@@ -7,8 +7,20 @@ from pathlib import Path
 
 
 FILENAME_RE = re.compile(
-    r"^(?P<product_id>.+)_(?P<granularity_seconds>\d+)s_(?P<start>\d{4}-\d{2}-\d{2})_(?P<end>\d{4}-\d{2}-\d{2})\.csv$"
+    r"^(?P<product_id>.+)_(?P<granularity>(\d+s|\d+[mhd]))_(?P<start>\d{4}-\d{2}-\d{2})_(?P<end>\d{4}-\d{2}-\d{2})\.csv$"
 )
+
+LABEL_TO_SECONDS = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+    "2h": 7200,
+    "4h": 14400,
+    "6h": 21600,
+    "1d": 86400,
+}
 
 
 def _parse_args() -> argparse.Namespace:
@@ -32,10 +44,18 @@ def main() -> None:
         if not match:
             print(f"Skipping (unrecognized filename): {path.name}")
             continue
+        granularity = match.group("granularity")
+        if granularity.endswith("s"):
+            granularity_seconds = granularity[:-1]
+        else:
+            granularity_seconds = str(LABEL_TO_SECONDS.get(granularity, ""))
+            if not granularity_seconds:
+                print(f"Skipping (unknown granularity label): {path.name}")
+                continue
         rows.append(
             {
                 "product_id": match.group("product_id"),
-                "granularity_seconds": match.group("granularity_seconds"),
+                "granularity_seconds": granularity_seconds,
                 "dataset_start": match.group("start"),
                 "dataset_end": match.group("end"),
                 "processed_path": str(path.as_posix()),

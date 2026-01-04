@@ -32,6 +32,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--slow", default="80,100,150", help="Slow SMA grid (comma-separated).")
     p.add_argument("--initial-cash", type=float, default=1.0, help="Initial cash in quote currency units (default: 1.0).")
     p.add_argument("--out-dir", default="research/output/sweeps", help="Output directory.")
+    p.add_argument("--start", default=None, help="UTC start datetime (ISO8601) to window the sweep.")
+    p.add_argument("--end", default=None, help="UTC end datetime (ISO8601) to window the sweep.")
     return p.parse_args()
 
 
@@ -69,6 +71,13 @@ def main() -> None:
 
     df = load_ohlcv_csv(csv_path)
     granularity_seconds = int(args.granularity_seconds) if args.granularity_seconds else infer_granularity_seconds(csv_path, df)
+    if args.start or args.end:
+        df["time"] = pd.to_datetime(df["time"], utc=True)
+        start_dt = pd.to_datetime(args.start, utc=True) if args.start else df["time"].min()
+        end_dt = pd.to_datetime(args.end, utc=True) if args.end else df["time"].max()
+        df = df[(df["time"] >= start_dt) & (df["time"] <= end_dt)].reset_index(drop=True)
+        if df.empty:
+            raise SystemExit("No candles available in the requested window.")
 
     segments, _ = apply_gap_policy(
         df,

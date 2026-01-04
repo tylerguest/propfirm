@@ -12,6 +12,7 @@ class Fill:
     fill_id: str
     time_utc: datetime
     symbol: str
+    strategy: str
     side: str
     price: float
     qty_base: float
@@ -81,6 +82,7 @@ def parse_fill(row: dict[str, str]) -> Fill:
         fill_id=(row.get("fill_id") or "").strip(),
         time_utc=_parse_iso8601(row.get("time_utc") or ""),
         symbol=(row.get("symbol") or "").strip(),
+        strategy=(row.get("strategy") or "").strip(),
         side=_normalize_side(row.get("side") or ""),
         price=_to_float(row.get("price") or ""),
         qty_base=_to_float(row.get("qty_base") or ""),
@@ -100,12 +102,13 @@ def derive_trade_episodes(
     # Returns:
     # - fill_id -> derived trade_id mapping
     # - trades summary rows (CSV dicts)
-    fills_sorted = sorted(fills, key=lambda f: (f.symbol, f.time_utc, f.fill_id))
+    fills_sorted = sorted(fills, key=lambda f: (f.symbol, f.strategy, f.time_utc, f.fill_id))
 
     fill_to_trade: dict[str, str] = {}
     trades_rows: list[dict[str, str]] = []
 
     current_symbol: str | None = None
+    current_strategy: str | None = None
     episode_index = 0
     last_time: datetime | None = None
 
@@ -125,10 +128,18 @@ def derive_trade_episodes(
         nonlocal pos_qty, cash_flow, entry_qty, entry_notional, exit_qty, exit_notional
         nonlocal entry_fees, exit_fees, first_time, last_fill_time, direction
 
-        if current_symbol is None or first_time is None or last_fill_time is None or episode_index == 0:
+        if (
+            current_symbol is None
+            or current_strategy is None
+            or first_time is None
+            or last_fill_time is None
+            or episode_index == 0
+        ):
             return
 
-        trade_id = f"{current_symbol.replace('/', '-')}-{first_time.date().isoformat()}-{episode_index:03d}"
+        safe_symbol = current_symbol.replace("/", "-")
+        safe_strategy = current_strategy.replace(" ", "_") if current_strategy else "unknown"
+        trade_id = f"{safe_symbol}-{safe_strategy}-{first_time.date().isoformat()}-{episode_index:03d}"
         realized_pnl = cash_flow if abs(pos_qty) < 1e-12 else ""
 
         entry_avg = (entry_notional / entry_qty) if entry_qty > 0 else ""
@@ -146,7 +157,7 @@ def derive_trade_episodes(
                 "symbol": current_symbol,
                 "product_type": "spot",
                 "timeframe": "",
-                "strategy": "",
+                "strategy": current_strategy or "",
                 "setup": "",
                 "thesis": "",
                 "direction": direction or "",
@@ -204,14 +215,17 @@ def derive_trade_episodes(
             continue
 
         symbol_changed = current_symbol is not None and f.symbol != current_symbol
+        strategy_changed = current_strategy is not None and f.strategy != current_strategy
         time_gap = last_time is not None and (f.time_utc - last_time).total_seconds() > gap_seconds
 
         if current_symbol is None:
             current_symbol = f.symbol
+            current_strategy = f.strategy
             episode_index = 1
-        elif symbol_changed or time_gap:
+        elif symbol_changed or strategy_changed or time_gap:
             close_episode()
             current_symbol = f.symbol
+            current_strategy = f.strategy
             episode_index = 1
 
         # Start first timestamp for this episode
@@ -241,7 +255,9 @@ def derive_trade_episodes(
             exit_notional += f.qty_quote
             exit_fees += f.fee_quote
 
-        trade_id = f"{current_symbol.replace('/', '-')}-{first_time.date().isoformat()}-{episode_index:03d}"
+        safe_symbol = current_symbol.replace("/", "-")
+        safe_strategy = current_strategy.replace(" ", "_") if current_strategy else "unknown"
+        trade_id = f"{safe_symbol}-{safe_strategy}-{first_time.date().isoformat()}-{episode_index:03d}"
         fill_to_trade[f.fill_id] = trade_id
 
         # Close trade when flat again (spot-style trade episode)
@@ -294,4 +310,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

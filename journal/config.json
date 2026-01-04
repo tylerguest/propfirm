@@ -1,0 +1,18 @@
+{
+  "paths": {
+    "fills": "journal/local/fills.csv",
+    "trades": "journal/local/trades.csv",
+    "ledger": "journal/local/ledger.csv",
+    "report_daily_md": "reporting/daily_report.md",
+    "report_daily_log": "reporting/daily_report_log.csv"
+  },
+  "dedupe_keys": {
+    "fills": ["fill_id"],
+    "trades": ["trade_id"],
+    "ledger": ["transaction_id", "time_utc", "amount", "currency"]
+  },
+  "notes": {
+    "fills_fallback_key": ["order_id", "time_utc", "symbol", "side", "price", "qty_base"],
+    "timezone": "UTC"
+  }
+}

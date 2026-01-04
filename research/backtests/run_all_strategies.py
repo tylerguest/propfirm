@@ -211,7 +211,19 @@ def _run_id(
     ts = created_at.strftime("%Y%m%dT%H%M%SZ")
     start_date = data_start.date().isoformat()
     end_date = data_end.date().isoformat()
-    return f"{symbol}_{granularity_seconds}s_{start_date}_{end_date}_x{strategy_count}_{config_hash[:8]}_{ts}"
+    label_map = {
+        60: "1m",
+        300: "5m",
+        900: "15m",
+        1800: "30m",
+        3600: "1h",
+        7200: "2h",
+        14400: "4h",
+        21600: "6h",
+        86400: "1d",
+    }
+    gran_label = label_map.get(int(granularity_seconds), f"{granularity_seconds}s")
+    return f"{symbol}_{gran_label}_{start_date}_{end_date}_x{strategy_count}_{config_hash[:8]}_{ts}"
 
 
 def _append_registry_row(*, output_dir: Path, row: dict[str, str]) -> None:
@@ -301,7 +313,7 @@ def _run_for_symbol(args: argparse.Namespace, *, symbol: str | None) -> None:
     if args.csv:
         csv_path = Path(args.csv)
     else:
-        spec = DataSpec(symbol=symbol)
+        spec = DataSpec(symbol=symbol, granularity_seconds=args.granularity_seconds)
         csv_path = find_processed_csv(spec)
     if not csv_path.exists():
         raise SystemExit(f"CSV not found: {csv_path}")

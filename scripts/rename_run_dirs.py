@@ -49,7 +49,19 @@ def _build_run_id(cfg: dict[str, object]) -> str:
     else:
         ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-    return f"{symbol}_{granularity_seconds}s_{start_date}_{end_date}_x{strategy_count}_{config_hash}_{ts}"
+    label_map = {
+        60: "1m",
+        300: "5m",
+        900: "15m",
+        1800: "30m",
+        3600: "1h",
+        7200: "2h",
+        14400: "4h",
+        21600: "6h",
+        86400: "1d",
+    }
+    gran_label = label_map.get(int(granularity_seconds), f"{granularity_seconds}s")
+    return f"{symbol}_{gran_label}_{start_date}_{end_date}_x{strategy_count}_{config_hash}_{ts}"
 
 
 def _dedupe_name(target: Path) -> Path:

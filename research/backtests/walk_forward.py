@@ -281,7 +281,19 @@ def main() -> None:
         symbol = str(args.symbol).strip() if args.symbol else "latest"
         start_date = pd.Timestamp(start).date().isoformat()
         end_date = pd.Timestamp(end).date().isoformat()
-        run_id = f"{symbol}_{cfg.granularity_seconds}s_{start_date}_{end_date}_wf_{ts}"
+        label_map = {
+            60: "1m",
+            300: "5m",
+            900: "15m",
+            1800: "30m",
+            3600: "1h",
+            7200: "2h",
+            14400: "4h",
+            21600: "6h",
+            86400: "1d",
+        }
+        gran_label = label_map.get(int(cfg.granularity_seconds), f"{cfg.granularity_seconds}s")
+        run_id = f"{symbol}_{gran_label}_{start_date}_{end_date}_wf_{ts}"
         run_dir = out_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "config.json").write_text(

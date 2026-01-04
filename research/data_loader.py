@@ -11,7 +11,19 @@ class DataSpec:
     granularity_seconds: int | None = None
 
 
-_FILENAME_RE = re.compile(r"(?P<symbol>[A-Z0-9-]+)_(?P<granularity>\d+)s_")
+_FILENAME_RE = re.compile(r"(?P<symbol>[A-Z0-9-]+)_(?P<granularity>\d+s|\d+[mhd])_")
+
+_LABEL_TO_SECONDS = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+    "2h": 7200,
+    "4h": 14400,
+    "6h": 21600,
+    "1d": 86400,
+}
 
 
 def _parse_filename(path: Path) -> tuple[str | None, int | None]:
@@ -19,7 +31,11 @@ def _parse_filename(path: Path) -> tuple[str | None, int | None]:
     if not m:
         return None, None
     symbol = m.group("symbol")
-    granularity = int(m.group("granularity"))
+    raw = m.group("granularity")
+    if raw.endswith("s"):
+        granularity = int(raw[:-1])
+    else:
+        granularity = _LABEL_TO_SECONDS.get(raw)
     return symbol, granularity
 
 

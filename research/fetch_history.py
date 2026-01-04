@@ -14,6 +14,7 @@ import requests
 
 
 COINBASE_EXCHANGE_API = "https://api.exchange.coinbase.com"
+SUPPORTED_GRANULARITIES = {60, 300, 900, 3600, 21600, 86400}
 
 
 @dataclass(frozen=True)
@@ -393,18 +394,42 @@ def main() -> None:
         granularities = [int(x.strip()) for x in str(args.granularities_seconds).split(",") if x.strip()]
     else:
         granularities = [int(args.granularity_seconds)]
+    invalid_granularities = [g for g in granularities if g not in SUPPORTED_GRANULARITIES]
+    if invalid_granularities:
+        print(
+            "Warning: removing unsupported granularities "
+            f"{sorted(set(invalid_granularities))}. Supported: {sorted(SUPPORTED_GRANULARITIES)}"
+        )
+        granularities = [g for g in granularities if g in SUPPORTED_GRANULARITIES]
+    if not granularities:
+        raise ValueError(f"No valid granularities supplied. Supported: {sorted(SUPPORTED_GRANULARITIES)}")
 
     out_dir_raw = Path(args.raw_dir)
     out_dir_processed = Path(args.processed_dir)
     out_dir_raw.mkdir(parents=True, exist_ok=True)
     out_dir_processed.mkdir(parents=True, exist_ok=True)
 
+    def _granularity_label(seconds: int) -> str:
+        label_map = {
+            60: "1m",
+            300: "5m",
+            900: "15m",
+            3600: "1h",
+            21600: "6h",
+            86400: "1d",
+        }
+        return label_map.get(seconds, f"{seconds}s")
+
     def _clean_old_outputs(*, symbol: str, granularity_seconds: int) -> None:
-        prefix = f"{symbol}_{granularity_seconds}s_"
-        for path in out_dir_raw.glob(f"{prefix}*.json"):
-            path.unlink(missing_ok=True)
-        for path in out_dir_processed.glob(f"{prefix}*.csv"):
-            path.unlink(missing_ok=True)
+        prefixes = [
+            f"{symbol}_{granularity_seconds}s_",
+            f"{symbol}_{_granularity_label(granularity_seconds)}_",
+        ]
+        for prefix in prefixes:
+            for path in out_dir_raw.glob(f"{prefix}*.json"):
+                path.unlink(missing_ok=True)
+            for path in out_dir_processed.glob(f"{prefix}*.csv"):
+                path.unlink(missing_ok=True)
 
     index_path = out_dir_processed / "index.csv"
     index_header = [
@@ -463,7 +488,7 @@ def main() -> None:
             safe_product = cfg.product_id.replace("/", "-")
             dataset_start = pd.Timestamp(df["time"].min()).date()
             dataset_end = pd.Timestamp(df["time"].max()).date()
-            label = f"{safe_product}_{cfg.granularity_seconds}s_{dataset_start}_{dataset_end}"
+            label = f"{safe_product}_{_granularity_label(cfg.granularity_seconds)}_{dataset_start}_{dataset_end}"
 
             raw_path = cfg.out_dir_raw / f"{label}.json"
             processed_path = cfg.out_dir_processed / f"{label}.csv"

@@ -11,7 +11,7 @@
   ```
 - Run with a specific CSV:
   ```bash
-  python3 research/backtests/run_all_strategies.py --csv data/processed/BTC-USD_3600s_2021-01-03_2026-01-02.csv --config research/configs/backtest_base.json
+  python3 research/backtests/run_all_strategies.py --csv data/processed/BTC-USD_1h_2021-01-03_2026-01-02.csv --config research/configs/backtest_base.json
   ```
 - Walk-forward splits (2y train / 1y test):
   ```bash

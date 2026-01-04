@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ class JournalPaths:
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Manual trade journal helper (init/validate).")
+    p.add_argument("--config", default="journal/config.json", help="Optional journal config path.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     init = sub.add_parser("init", help="Create journal/local CSVs from templates (does not overwrite).")
@@ -54,6 +56,70 @@ def _read_header(path: Path) -> list[str]:
         for row in reader:
             return [c.strip() for c in row]
     raise RuntimeError(f"Empty CSV (no header): {path}")
+
+
+def _load_config(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _local_paths_from_config(config: dict[str, object]) -> dict[str, Path]:
+    paths = config.get("paths", {}) if isinstance(config, dict) else {}
+    if not isinstance(paths, dict):
+        return {}
+    result: dict[str, Path] = {}
+    for key in ("fills", "trades", "ledger"):
+        value = paths.get(key)
+        if isinstance(value, str) and value.strip():
+            result[key] = Path(value)
+    return result
+
+
+REQUIRED_FILLS = [
+    "fill_id",
+    "time_utc",
+    "symbol",
+    "side",
+    "price",
+    "qty_base",
+    "qty_quote",
+    "fee_quote",
+    "liquidity",
+    "order_id",
+]
+
+REQUIRED_TRADES = [
+    "trade_id",
+    "created_at_utc",
+    "updated_at_utc",
+    "venue",
+    "account",
+    "symbol",
+    "product_type",
+    "direction",
+    "entry_time_utc",
+    "entry_avg_price",
+    "entry_qty_base",
+    "entry_qty_quote",
+    "entry_fee_quote",
+    "exit_time_utc",
+    "exit_avg_price",
+    "exit_qty_base",
+    "exit_qty_quote",
+    "exit_fee_quote",
+    "realized_pnl_quote",
+    "holding_time_hours",
+]
+
+REQUIRED_LEDGER = [
+    "time_utc",
+    "type",
+    "amount",
+    "currency",
+    "transaction_id",
+]
 
 
 def _copy_template(src: Path, dst: Path, *, force: bool) -> None:
@@ -116,54 +182,74 @@ def _validate_timestamps(rows: list[dict[str, str]], *, columns: list[str], file
             raise SystemExit(f"{file}: invalid timestamps in {col}: {bad_values}")
 
 
-def validate_journal(paths: JournalPaths) -> None:
-    if not paths.local_trades.exists() or not paths.local_fills.exists() or not paths.local_ledger.exists():
+def validate_journal(paths: JournalPaths, *, local_override: dict[str, Path] | None = None) -> None:
+    local_trades = local_override.get("trades") if local_override else None
+    local_fills = local_override.get("fills") if local_override else None
+    local_ledger = local_override.get("ledger") if local_override else None
+
+    local_trades = local_trades or paths.local_trades
+    local_fills = local_fills or paths.local_fills
+    local_ledger = local_ledger or paths.local_ledger
+
+    if not local_trades.exists() or not local_fills.exists() or not local_ledger.exists():
         raise SystemExit("Journal not initialized. Run: python3 journal/tools/journal_cli.py init")
 
     template_trades_cols = _read_header(paths.template_trades)
     template_fills_cols = _read_header(paths.template_fills)
     template_ledger_cols = _read_header(paths.template_ledger)
 
-    trades_cols, trades_rows = _read_csv_rows(paths.local_trades)
-    fills_cols, fills_rows = _read_csv_rows(paths.local_fills)
-    ledger_cols, ledger_rows = _read_csv_rows(paths.local_ledger)
+    trades_cols, trades_rows = _read_csv_rows(local_trades)
+    fills_cols, fills_rows = _read_csv_rows(local_fills)
+    ledger_cols, ledger_rows = _read_csv_rows(local_ledger)
 
     missing_trades = sorted(set(template_trades_cols) - set(trades_cols))
     missing_fills = sorted(set(template_fills_cols) - set(fills_cols))
     missing_ledger = sorted(set(template_ledger_cols) - set(ledger_cols))
 
     if missing_trades:
-        raise SystemExit(f"{paths.local_trades}: missing columns: {missing_trades}")
+        raise SystemExit(f"{local_trades}: missing columns: {missing_trades}")
     if missing_fills:
-        raise SystemExit(f"{paths.local_fills}: missing columns: {missing_fills}")
+        raise SystemExit(f"{local_fills}: missing columns: {missing_fills}")
     if missing_ledger:
-        raise SystemExit(f"{paths.local_ledger}: missing columns: {missing_ledger}")
+        raise SystemExit(f"{local_ledger}: missing columns: {missing_ledger}")
+
+    required_trades = sorted(set(REQUIRED_TRADES) - set(trades_cols))
+    required_fills = sorted(set(REQUIRED_FILLS) - set(fills_cols))
+    required_ledger = sorted(set(REQUIRED_LEDGER) - set(ledger_cols))
+    if required_trades:
+        raise SystemExit(f"{local_trades}: missing required columns: {required_trades}")
+    if required_fills:
+        raise SystemExit(f"{local_fills}: missing required columns: {required_fills}")
+    if required_ledger:
+        raise SystemExit(f"{local_ledger}: missing required columns: {required_ledger}")
 
     _validate_timestamps(
         trades_rows,
         columns=["created_at_utc", "updated_at_utc", "entry_time_utc", "exit_time_utc"],
-        file=paths.local_trades,
+        file=local_trades,
     )
-    _validate_timestamps(fills_rows, columns=["time_utc"], file=paths.local_fills)
-    _validate_timestamps(ledger_rows, columns=["time_utc"], file=paths.local_ledger)
+    _validate_timestamps(fills_rows, columns=["time_utc"], file=local_fills)
+    _validate_timestamps(ledger_rows, columns=["time_utc"], file=local_ledger)
 
     now = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
     print("Validation: OK")
-    print(f"- trades rows: {len(trades_rows)}")
-    print(f"- fills rows:  {len(fills_rows)}")
-    print(f"- ledger rows: {len(ledger_rows)}")
+    print(f"- trades rows: {len(trades_rows)} ({local_trades})")
+    print(f"- fills rows:  {len(fills_rows)} ({local_fills})")
+    print(f"- ledger rows: {len(ledger_rows)} ({local_ledger})")
     print(f"- checked at:  {now}")
 
 
 def main() -> None:
     args = _parse_args()
     paths = JournalPaths(templates_dir=Path("journal/templates"), local_dir=Path("journal/local"))
+    config = _load_config(Path(args.config))
+    local_override = _local_paths_from_config(config)
 
     if args.cmd == "init":
         init_journal(paths, force=bool(args.force))
         return
     if args.cmd == "validate":
-        validate_journal(paths)
+        validate_journal(paths, local_override=local_override)
         return
     raise SystemExit(f"Unknown command: {args.cmd}")
 
